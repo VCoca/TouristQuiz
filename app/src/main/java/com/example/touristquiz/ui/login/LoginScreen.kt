@@ -50,7 +50,7 @@ fun LoginScreen(
             onClick = {
                 // Client-side validation to prevent empty submissions
                 if (email.isBlank() || password.isBlank()) {
-                    message = "Please enter both email and password"
+                    message = "Unesite email i sifru"
                     return@Button
                 }
 
@@ -62,7 +62,6 @@ fun LoginScreen(
                             try {
                                 onLoginSuccess()
                             } catch (e: Exception) {
-                                // Prevent app crash if navigation or downstream screen throws
                                 message = "Navigation error: ${e.message}"
                                 e.printStackTrace()
                             }
@@ -81,7 +80,7 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         TextButton(onClick = onRegisterClick) {
-            Text("Don't have an account? Register")
+            Text("Nemate nalog? Registrujte se")
         }
 
         if (message.isNotEmpty()) {
