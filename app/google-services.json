@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "382199073349",
+    "project_id": "touristquiz-9fcba",
+    "storage_bucket": "touristquiz-9fcba.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:382199073349:android:83884da5e381ea2150712c",
+        "android_client_info": {
+          "package_name": "com.example.touristquiz"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjwqX4675vFSRCT0WSHg0IMxPZBrAxSNQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
