@@ -29,11 +29,14 @@ fun UserLocationsOverlay(
     currentUserId: String?,
     repository: UserLocationRepository = UserLocationRepository(),
     onMyLocationUpdated: (LatLng) -> Unit = {},
-    showCurrentUserMarker: Boolean = true
+    // New: center and distance filtering
+    centerLatLng: LatLng? = null,
+    limitByDistance: Boolean = false,
+    maxDistanceMeters: Float = 0f,
 ) {
     val context = LocalContext.current
 
-    // Permissions for location updates
+    // Permisije za lokaciju
     val locationPermissions = rememberMultiplePermissionsState(
         permissions = listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -45,7 +48,7 @@ fun UserLocationsOverlay(
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     val myMarkerState = remember { MarkerState() }
 
-    // Current user's profile image URL (for uploading and marker icon)
+    // Moja slika
     var myProfileImageUrl by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(currentUserId) {
         val uid = currentUserId ?: return@LaunchedEffect
@@ -71,11 +74,30 @@ fun UserLocationsOverlay(
     val markerStates = remember { mutableStateMapOf<String, MarkerState>() }
     val bitmapCache = remember { mutableStateMapOf<String, Bitmap?>() }
 
-    // Keep marker states in sync with online users
-    val presentIds = remember(locations) { locations.map { it.uid }.toSet() }
+    // Primenjen filter po distanci za druge korisnike
+    val filteredOthers = remember(locations, centerLatLng, limitByDistance, maxDistanceMeters, currentUserId) {
+        val base = locations.filter { it.uid != currentUserId }
+        if (!limitByDistance || centerLatLng == null) base else {
+            base.filter { loc ->
+                val results = FloatArray(1)
+                Location.distanceBetween(
+                    centerLatLng.latitude, centerLatLng.longitude,
+                    loc.latLng.latitude, loc.latLng.longitude,
+                    results
+                )
+                results[0] <= maxDistanceMeters
+            }
+        }
+    }
+
+    // Sinhronizacija markera sa filtriranim lokacijama (ukloni nestale ili van dometa)
+    val presentIds = remember(filteredOthers) { filteredOthers.map { it.uid }.toSet() }
     LaunchedEffect(presentIds) {
         val toRemove = markerStates.keys - presentIds
-        toRemove.forEach { markerStates.remove(it) }
+        toRemove.forEach {
+            markerStates.remove(it)
+            bitmapCache.remove(it)
+        }
     }
 
     // Kada dobijemo dozvole, pocni location updates i upload moje lokacije
@@ -117,11 +139,8 @@ fun UserLocationsOverlay(
         }
     }
 
-    // Prikaz markera
-    // Ostali
-    locations.forEach { userLoc ->
-        if (userLoc.uid == currentUserId) return@forEach
-
+    // Prikaz markera - ostali (filtrirani)
+    filteredOthers.forEach { userLoc ->
         val state = markerStates.getOrPut(userLoc.uid) { MarkerState(position = userLoc.latLng) }
         LaunchedEffect(userLoc.uid, userLoc.latLng) { state.position = userLoc.latLng }
 
@@ -140,7 +159,7 @@ fun UserLocationsOverlay(
                     val result = context.imageLoader.execute(request)
                     if (result is SuccessResult) {
                         val original = result.drawable.toBitmap()
-                        val scaled = original.scale(100, 100)
+                        val scaled = original.scale(64, 64)
                         bitmapCache[imageKey] = scaled
                     } else {
                         Log.d("UserLocationsOverlay", "Image load failed for $url")
@@ -162,38 +181,36 @@ fun UserLocationsOverlay(
         }
     }
 
-    // My marker (optional)
-    if (showCurrentUserMarker) {
-        val myImageKey = (myProfileImageUrl ?: currentUserId) ?: "me"
-        val myCached = bitmapCache[myImageKey]
-        LaunchedEffect(myImageKey) {
-            if (bitmapCache.containsKey(myImageKey)) return@LaunchedEffect
-            val url = myProfileImageUrl
-            if (url != null) {
-                try {
-                    val request = ImageRequest.Builder(context)
-                        .data(url)
-                        .transformations(CircleCropTransformation())
-                        .allowHardware(false)
-                        .build()
-                    val result = context.imageLoader.execute(request)
-                    if (result is SuccessResult) {
-                        val original = result.drawable.toBitmap()
-                        val scaled = original.scale(100, 100)
-                        bitmapCache[myImageKey] = scaled
-                    } else bitmapCache[myImageKey] = null
-                } catch (e: Exception) {
-                    Log.w("UserLocationsOverlay", "My avatar load error: ${e.message}")
-                    bitmapCache[myImageKey] = null
-                }
-            } else {
+    // Moj marker
+    val myImageKey = (myProfileImageUrl ?: currentUserId) ?: "me"
+    val myCached = bitmapCache[myImageKey]
+    LaunchedEffect(myImageKey) {
+        if (bitmapCache.containsKey(myImageKey)) return@LaunchedEffect
+        val url = myProfileImageUrl
+        if (url != null) {
+            try {
+                val request = ImageRequest.Builder(context)
+                    .data(url)
+                    .transformations(CircleCropTransformation())
+                    .allowHardware(false)
+                    .build()
+                val result = context.imageLoader.execute(request)
+                if (result is SuccessResult) {
+                    val original = result.drawable.toBitmap()
+                    val scaled = original.scale(100, 100)
+                    bitmapCache[myImageKey] = scaled
+                } else bitmapCache[myImageKey] = null
+            } catch (e: Exception) {
+                Log.w("UserLocationsOverlay", "My avatar load error: ${e.message}")
                 bitmapCache[myImageKey] = null
             }
-        }
-        if (myCached != null) {
-            Marker(state = myMarkerState, icon = BitmapDescriptorFactory.fromBitmap(myCached))
         } else {
-            Marker(state = myMarkerState)
+            bitmapCache[myImageKey] = null
         }
+    }
+    if (myCached != null) {
+        Marker(state = myMarkerState, icon = BitmapDescriptorFactory.fromBitmap(myCached))
+    } else {
+        Marker(state = myMarkerState)
     }
 }

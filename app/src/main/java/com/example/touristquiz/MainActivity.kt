@@ -34,10 +34,10 @@ class MainActivity : ComponentActivity() {
     private val locationRepo by lazy { UserLocationRepository() }
     private var lastSignedInUid: String? = null
 
-    // Ask for notifications on Android 13+
+    // Pitaj za notifikacije (API 33+)
     private val requestNotifications = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* user choice handled by system; we can still run FGS but non-FGS notifications may be blocked */ }
+    ) {  }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
             android.util.Log.w("MainActivity", "MapsInitializer.initialize failed: ${e.message}")
         }
 
-        // Request notification permission proactively on API 33+
+        // Trazi dozvolu za notifikacije ako je API 33+
         if (Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
                 this,
@@ -66,7 +66,6 @@ class MainActivity : ComponentActivity() {
             val user = firebaseAuth.currentUser
             if (user != null) {
                 lastSignedInUid = user.uid
-                // Start if fine or coarse is granted
                 val fineGranted = ActivityCompat.checkSelfPermission(
                     this,
                     Manifest.permission.ACCESS_FINE_LOCATION
@@ -109,28 +108,27 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        // Auto-logout when the Activity is actually finishing (e.g., back exit)
+        // Auto logout i brisanje lokacije ako se activity gasi (ne radi se o rotaciji)
         if (isFinishing && !isChangingConfigurations) {
             try {
                 val uid = auth.currentUser?.uid ?: lastSignedInUid
                 if (uid != null) {
-                    // Ensure location doc is deleted even if auth listener timing differs
                     locationRepo.deleteLocation(uid)
                 }
-                // Stop proximity service proactively
+                // Stop servis
                 try {
                     val intent = Intent(this, ProximityService::class.java)
                     stopService(intent)
                 } catch (e: Exception) {
                     android.util.Log.w("MainActivity", "Failed to stop service in onDestroy: ${e.message}")
                 }
-                // Sign out last
+                // Sign out
                 auth.signOut()
             } catch (e: Exception) {
                 android.util.Log.w("MainActivity", "Sign out/cleanup failed in onDestroy: ${e.message}")
             }
         }
-        // Remove listener after potential sign-out so cleanup runs
+        // Ukloni listener
         authListener?.let { auth.removeAuthStateListener(it) }
         super.onDestroy()
     }
@@ -168,7 +166,7 @@ fun AuthApp(authRepository: AuthRepository, imageRepository: ImageRepository) {
                             popUpTo("login") { inclusive = true }
                         }
                     } catch (e: Exception) {
-                        android.widget.Toast.makeText(ctx, "Navigation failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                        Toast.makeText(ctx, "Navigation failed: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }
             )

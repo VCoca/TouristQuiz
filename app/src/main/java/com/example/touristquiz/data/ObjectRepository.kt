@@ -189,7 +189,6 @@ class ObjectRepository(
             .collection("questions").document(questionId).get().await()
         var correctIndex = qDoc.getLong("correctIndex")?.toInt()
         if (correctIndex == null) {
-            // Fallback for legacy docs: derive from correctAnswer and options
             val ans = qDoc.getString("correctAnswer")
             val opt1 = qDoc.getString("option1")
             val opt2 = qDoc.getString("option2")
@@ -203,13 +202,16 @@ class ObjectRepository(
         val isCorrect = correctIndex != null && correctIndex == selectedIndex
         if (isCorrect) {
             val batch = firestore.batch()
-            batch.set(answeredRef, mapOf("at" to FieldValue.serverTimestamp()))
+            batch.set(answeredRef, mapOf("at" to FieldValue.serverTimestamp(), "correct" to true))
             val userRef = firestore.collection("users").document(userUid)
             batch.update(userRef, mapOf("points" to FieldValue.increment(5)))
             batch.commit().await()
             return AnswerResult.Correct
+        } else {
+            // Markiraj kao odgovoreno, ali netacno
+            answeredRef.set(mapOf("at" to FieldValue.serverTimestamp(), "correct" to false)).await()
+            return AnswerResult.Incorrect
         }
-        return AnswerResult.Incorrect
     }
 
     suspend fun getAnsweredQuestionIds(userUid: String, objectId: String): Set<String> {
@@ -299,10 +301,9 @@ class ObjectRepository(
             if (!snap.exists()) return false
             val ownerUid = snap.getString("ownerUid")
             if (ownerUid == null || ownerUid != requesterUid) return false
-            // Delete questions in chunks to respect batch limits
             val qSnap = docRef.collection("questions").get().await()
             val qDocs = qSnap.documents
-            val chunkSize = 400 // below Firestore 500 limit for safety
+            val chunkSize = 400
             qDocs.chunked(chunkSize).forEach { chunk ->
                 val batch = firestore.batch()
                 chunk.forEach { d -> batch.delete(d.reference) }

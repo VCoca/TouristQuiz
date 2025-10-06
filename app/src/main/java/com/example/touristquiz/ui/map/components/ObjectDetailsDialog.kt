@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -43,7 +44,7 @@ fun ObjectDetailsDialog(
     var newQOptions by remember { mutableStateOf(listOf("", "", "")) }
     var newQCorrect by remember { mutableStateOf(0) }
 
-    // Track selected index per question and answer result to control UI
+    // Pratimo izabranu opciju za svako pitanje
     val selectedIdxMap = remember { mutableStateMapOf<String, Int>() }
     val answerStatus = remember { mutableStateMapOf<String, ObjectRepository.AnswerResult>() }
 
@@ -66,8 +67,17 @@ fun ObjectDetailsDialog(
                             .padding(bottom = 8.dp)
                     )
                 }
-                Text("By: $ownerDisplay")
-                type?.let { Text("Type: ${it.replaceFirstChar { c -> c.uppercase() }}") }
+                 Text("By: $ownerDisplay")
+                type?.let {
+                    val raw = it.trim().lowercase()
+                    val label = when (raw) {
+                        "attraction", "turistička atrakcija", "turisticka atrakcija", "tourist attraction" -> "Turistička atrakcija"
+                        "cultural", "kulturni objekat", "cultural object" -> "Kulturni objekat"
+                        "historical", "istorijska lokacija", "historical location" -> "Istorijska lokacija"
+                        else -> it.replaceFirstChar { c -> c.uppercase() }
+                    }
+                    Text("Tip: $label")
+                }
                 Text(details)
                 if (questions.isNotEmpty()) {
                     HorizontalDivider()
@@ -78,8 +88,8 @@ fun ObjectDetailsDialog(
                         val isCreator = currentUserUid != null && currentUserUid == (q.creatorUid ?: ownerUid)
                         val status = answerStatus[q.id]
                         val alreadyAnswered = answeredIds.contains(q.id)
-                        val alreadyCorrect = alreadyAnswered || status == ObjectRepository.AnswerResult.Correct || status == ObjectRepository.AnswerResult.AlreadyAnswered
-                        val canAnswer = !isCreator && !alreadyCorrect && q.options.size == 3 && currentUserUid != null
+                        val locked = alreadyAnswered || status != null
+                        val canAnswer = !isCreator && !locked && q.options.size == 3 && currentUserUid != null
 
                         if (canAnswer) {
                             (0..2).forEach { i ->
@@ -101,43 +111,54 @@ fun ObjectDetailsDialog(
                                 }
                             }) { Text("Submit") }
                         } else {
-                            // Show only the correct option if answered correctly or already answered
-                            if ((alreadyCorrect || alreadyAnswered) && q.correctIndex != null && q.options.size == 3) {
+                            val isCorrectOrAlready = (status == ObjectRepository.AnswerResult.Correct || status == ObjectRepository.AnswerResult.AlreadyAnswered || alreadyAnswered)
+                            if (isCorrectOrAlready && q.correctIndex != null && q.options.size == 3) {
                                 val ci = q.correctIndex
-                                Text("Correct: ${q.options[ci]}")
+                                Text("Tacno: ${q.options[ci]}")
+                            } else if (status == ObjectRepository.AnswerResult.Incorrect) {
+                                val correctText = when {
+                                    q.correctIndex != null && q.options.size == 3 -> q.options[q.correctIndex]
+                                    !q.correctAnswer.isNullOrBlank() -> q.correctAnswer
+                                    else -> "(N/A)"
+                                }
+                                Text("Netačno. Tačan odgovor: $correctText")
                             } else if (isCreator) {
-                                Text("(You created this question)")
+                                Text("(Vi ste napravili ovo pitanje)")
                             }
                         }
 
-                        // Rating UI: only if not creator and not already rated by this user
+                        // Ocenjivanje pitanja, samo ako korisnik nije kreator i nije već ocenio
                         val alreadyRated = q.ratings.containsKey(currentUserUid)
                         val creatorBlockUid = q.creatorUid ?: ownerUid
                         if (currentUserUid != null && (creatorBlockUid == null || currentUserUid != creatorBlockUid) && !alreadyRated) {
                             var rating by remember(q.id) { mutableStateOf(0) }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("Rate:")
+                            Row(
+                                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text("Oceni:")
                                 (1..5).forEach { r ->
                                     Button(onClick = { rating = r; onRateQuestion(q.id, r) }, enabled = rating == 0) { Text(r.toString()) }
                                 }
                             }
                         }
-                        Text("Average rating: %.2f (%d ratings)".format(q.averageRating, q.numRatings))
+                        Text("Prosecna ocena: %.2f (%d ocena)".format(q.averageRating, q.numRatings))
                     }
                     HorizontalDivider()
                 }
                 // Owner actions
                 if (currentUserUid != null && ownerUid != null && currentUserUid == ownerUid) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { showAddQuestionDialog = true }) { Text("Add Question") }
-                        Button(onClick = onDeleteObject) { Text("Delete object") }
+                        Button(onClick = { showAddQuestionDialog = true }) { Text("Dodaj pitanje") }
+                        Button(onClick = onDeleteObject) { Text("Ukloni objekat") }
                     }
                 }
             }
         }
     )
 
-    // Add Question Dialog
+    // Dodaj pitanje
     if (showAddQuestionDialog) {
         AlertDialog(
             onDismissRequest = { showAddQuestionDialog = false },
@@ -150,19 +171,19 @@ fun ObjectDetailsDialog(
                         newQOptions = listOf("", "", "")
                         newQCorrect = 0
                     }
-                }) { Text("Add") }
+                }) { Text("Dodaj") }
             },
-            title = { Text("Add Question") },
+            title = { Text("Dodaj pitanje") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = newQText, onValueChange = { newQText = it }, label = { Text("Question") })
+                    OutlinedTextField(value = newQText, onValueChange = { newQText = it }, label = { Text("Pitanje") })
                     (0..2).forEach { i ->
                         OutlinedTextField(value = newQOptions[i], onValueChange = {
                             newQOptions = newQOptions.toMutableList().apply { set(i, it) }
-                        }, label = { Text("Option ${i+1}") })
+                        }, label = { Text("Opcija ${i+1}") })
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Correct Answer:")
+                        Text("Tacan odgovor:")
                         (0..2).forEach { i ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = newQCorrect == i, onClick = { newQCorrect = i })

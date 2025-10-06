@@ -48,7 +48,6 @@ fun AddObjectDialog(
         onPickImage(uri)
     }
 
-    // Validation: require name, details, and at least one complete question
     val hasCompleteQuestion = questions.any { q ->
         q.text.isNotBlank() && q.options.size >= 3 && q.options.all { it.isNotBlank() }
     }
@@ -81,12 +80,12 @@ fun AddObjectDialog(
                 }
                 questions.forEachIndexed { index, qa ->
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedTextField(value = qa.text, onValueChange = { v -> onChangeQuestionText(index, v) }, label = { Text("Question") })
+                        OutlinedTextField(value = qa.text, onValueChange = { v -> onChangeQuestionText(index, v) }, label = { Text("Pitanje") })
                         (0..2).forEach { optIdx ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = qa.correctIndex == optIdx, onClick = { onChangeQuestionCorrectIndex(index, optIdx) })
                                 val optText = qa.options.getOrNull(optIdx) ?: ""
-                                OutlinedTextField(value = optText, onValueChange = { v -> onChangeQuestionOption(index, optIdx, v) }, label = { Text("Option ${optIdx + 1}") })
+                                OutlinedTextField(value = optText, onValueChange = { v -> onChangeQuestionOption(index, optIdx, v) }, label = { Text("Opcija ${optIdx + 1}") })
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -30,6 +30,7 @@ class ProximityService : Service() {
     private val repo = UserLocationRepository(firestore)
     private val notifiedAt = ConcurrentHashMap<String, Long>()
     private val notifiedObjectAt = ConcurrentHashMap<String, Long>()
+    private val userNameCache = ConcurrentHashMap<String, String>()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     override fun onCreate() {
@@ -57,7 +58,7 @@ class ProximityService : Service() {
             scope.launch {
                 checkUserProximity(loc)
                 checkObjectProximity(loc)
-                // upload own location with profileImageUrl from Firestore
+                // upload moja lokacija
                 auth.currentUser?.uid?.let { uid ->
                     val userDoc = firestore.collection("users").document(uid).get().await()
                     val profileImageUrl = userDoc.getString("profileImageUrl")
@@ -75,19 +76,31 @@ class ProximityService : Service() {
             snapshot.documents.forEach { doc ->
                 val otherUid = doc.id
                 if (otherUid == meUid) return@forEach
-                val name = doc.getString("name")?: return@forEach
                 val lat = doc.getDouble("lat") ?: return@forEach
                 val lng = doc.getDouble("lng") ?: return@forEach
+                val ts = doc.getTimestamp("updatedAt")
+                val updatedAtMs = ts?.toDate()?.time
+                if (updatedAtMs == null || now - updatedAtMs > 2 * 60_000L) return@forEach // online samo ako je u poslednja 2 minuta
+
+                val displayName = doc.getString("name") ?: userNameCache[otherUid] ?: run {
+                    val u = runCatching { firestore.collection("users").document(otherUid).get().await() }.getOrNull()
+                    val n = u?.getString("username") ?: u?.getString("email") ?: otherUid
+                    userNameCache[otherUid] = n
+                    n
+                }
+
                 val results = FloatArray(1)
                 Location.distanceBetween(myLoc.latitude, myLoc.longitude, lat, lng, results)
                 val distance = results[0]
                 val last = notifiedAt[otherUid] ?: 0L
-                if (distance <= thresholdMeters && now - last > 5 * 60_000L) { // notify at most every 5 minutes per user
+                if (distance <= thresholdMeters && now - last > 5 * 60_000L) { // na svakih 5 minuta
                     notifiedAt[otherUid] = now
-                    sendUserProximityNotification(otherUid, name, distance.toInt())
+                    sendUserProximityNotification(otherUid, displayName, distance.toInt())
                 }
             }
-        } catch (_: Exception) { /* ignore transient errors */ }
+        } catch (e: Exception) {
+            Log.w("ProximityService", "checkUserProximity failed: ${e.message}")
+        }
     }
 
     private suspend fun checkObjectProximity(myLoc: Location) {

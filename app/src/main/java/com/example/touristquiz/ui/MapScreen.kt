@@ -24,9 +24,17 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import com.google.android.gms.maps.CameraUpdateFactory
 
-// Helper: Load questions for an object
 private suspend fun repoLoadQuestions(repo: ObjectRepository, objectId: String) =
     repo.loadQuestions(objectId)
+
+// Time filter za objekte
+enum class TimeFilter(val label: String, val windowMillis: Long?) {
+    ALL("Sve vreme", null),
+    LAST_10M("Poslednjih 10 min", 10 * 60 * 1000L),
+    LAST_24H("Poslednja 24h", 24 * 60 * 60 * 1000L),
+    LAST_7D("Poslednjih 7 dana", 7 * 24 * 60 * 60 * 1000L),
+    LAST_30D("Poslednjih 30 dana", 30 * 24 * 60 * 60 * 1000L)
+}
 
 @Composable
 fun MapScreen(
@@ -34,17 +42,17 @@ fun MapScreen(
     imageRepository: ImageRepository? = null,
     onOpenLeaderboard: () -> Unit = {}
 ) {
-    // --- State: UI and Snackbar ---
+    // --- State: UI ai Snackbar ---
     val snackbar = remember { SnackbarHostState() }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    // --- State: Location (updated by UserLocationsOverlay) ---
+    // --- State: Lokacija ---
     val cameraPositionState = rememberCameraPositionState()
     var currentLatLng by remember { mutableStateOf<LatLng?>(null) }
     var cameraAnimated by remember { mutableStateOf(false) }
 
-    // --- State: User ---
+    // --- State: Korisnik ---
     val auth = remember { FirebaseAuth.getInstance() }
     var currentUserUid by remember { mutableStateOf(auth.currentUser?.uid) }
     DisposableEffect(auth) {
@@ -60,7 +68,7 @@ fun MapScreen(
         imageRepository?.let { ObjectRepository(FirebaseFirestore.getInstance(), it) }
     }
 
-    // --- State: Objects and Selection ---
+    // --- State: Objekti i selekcija ---
     var objects by remember { mutableStateOf<List<ObjectRepository.TouristObject>>(emptyList()) }
     var selectedObject by remember { mutableStateOf<ObjectRepository.TouristObject?>(null) }
     DisposableEffect(objectRepo) {
@@ -68,14 +76,14 @@ fun MapScreen(
         onDispose { reg?.remove() }
     }
 
-    // --- State: Add Object Dialog ---
+    // --- State: Object Dialog ---
     var showAddDialog by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var newDetails by remember { mutableStateOf("") }
     var newImageUri by remember { mutableStateOf<Uri?>(null) }
     val questions = remember { mutableStateListOf<QItem>() }
 
-    // --- State: Type Options ---
+    // --- State: Tipovi ---
     data class TypeOption(val key: String, val label: String)
     val typeOptions = remember {
         listOf(
@@ -86,7 +94,7 @@ fun MapScreen(
     }
     var selectedType by remember { mutableStateOf(typeOptions.first().label) }
 
-    // --- State: Questions ---
+    // --- State: Pitanja ---
     var questionList by remember { mutableStateOf<List<ObjectRepository.Question>>(emptyList()) }
     var answeredIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(selectedObject?.id, currentUserUid) {
@@ -101,7 +109,7 @@ fun MapScreen(
         }
     }
 
-    // --- State: Filters ---
+    // --- State: Filteri ---
     var showFilters by remember { mutableStateOf(false) }
     var onlyMine by remember { mutableStateOf(false) }
     val typeEnabled = remember {
@@ -114,22 +122,30 @@ fun MapScreen(
     var maxDistanceMeters by remember { mutableStateOf(1000f) } // 1km default
     var showObjectsTable by remember { mutableStateOf(false) }
 
-    // --- Helper: Normalize type string to canonical key ---
+    // --- State: Time Filter ---
+    var selectedTimeFilter by remember { mutableStateOf(TimeFilter.ALL) }
+
+    // --- Helper: Normalizuj string u key ---
     fun normalizeType(raw: String?): String {
         val r = raw?.trim()?.lowercase() ?: return "attraction"
-        return when {
-            r in listOf("turistička atrakcija", "turisticka atrakcija", "turistička lokacija", "turisticka lokacija", "tourist attraction", "attraction") -> "attraction"
-            r in listOf("kulturni objekat", "cultural", "culture", "kulturno", "kulturna lokacija") -> "cultural"
-            r in listOf("istorijska lokacija", "historical", "history", "istorijski objekat") -> "historical"
-            else -> "attraction"
+        return when (r) {
+            "attraction", "turistička atrakcija", "turisticka atrakcija", "tourist attraction" -> "attraction"
+            "cultural", "kulturni objekat", "cultural object" -> "cultural"
+            "historical", "istorijska lokacija", "historical location" -> "historical"
+            else -> r
         }
     }
 
-    // --- Compute filtered objects ---
+    // --- Filtrirani objekti ---
     val myUid = FirebaseAuth.getInstance().currentUser?.uid
     val typeEnabledSnapshot = typeEnabled.toMap()
-    val displayedObjects = remember(objects, onlyMine, typeEnabledSnapshot, limitByDistance, maxDistanceMeters, currentLatLng, creatorFilter) {
+    val nowMillis = System.currentTimeMillis()
+    val displayedObjects = remember(
+        objects, onlyMine, typeEnabledSnapshot, limitByDistance, maxDistanceMeters,
+        currentLatLng, creatorFilter, selectedTimeFilter
+    ) {
         val cf = creatorFilter.trim().lowercase()
+        val selectedWindow = selectedTimeFilter.windowMillis
         objects.filter { obj ->
             val typeKey = normalizeType(obj.type)
             val typeOk = typeEnabled[typeKey] == true
@@ -143,11 +159,14 @@ fun MapScreen(
                 )
                 results[0] <= maxDistanceMeters
             }
-            typeOk && mineOk && creatorOk && distOk
+            val timeOk = selectedWindow == null || (
+                obj.createdAt != null && nowMillis - obj.createdAt.toDate().time <= selectedWindow
+            )
+            typeOk && mineOk && creatorOk && distOk && timeOk
         }
     }
 
-    // --- Animate Camera on First Location ---
+    // --- Animiraj kameru za prvu lokaciju ---
     LaunchedEffect(currentLatLng) {
         if (!cameraAnimated && currentLatLng != null) {
             cameraPositionState.animate(
@@ -173,16 +192,17 @@ fun MapScreen(
                 modifier = Modifier.matchParentSize(),
                 cameraPositionState = cameraPositionState
             ) {
-                // All location markers are handled by UserLocationsOverlay
                 UserLocationsOverlay(
                     currentUserId = FirebaseAuth.getInstance().currentUser?.uid,
                     onMyLocationUpdated = { ll -> currentLatLng = ll },
-                    showCurrentUserMarker = true
+                    centerLatLng = currentLatLng,
+                    limitByDistance = limitByDistance,
+                    maxDistanceMeters = maxDistanceMeters,
                 )
                 ObjectMapOverlay(objects = displayedObjects, onObjectClick = { selectedObject = it })
             }
 
-            // --- Top-right: Filters and Objects Table ---
+            // --- Gore desno: Filteri, tabela i vremenski filter ---
             Surface(
                 modifier = Modifier.align(Alignment.TopEnd).padding(top = 24.dp, end = 16.dp),
                 shape = MaterialTheme.shapes.small,
@@ -195,36 +215,29 @@ fun MapScreen(
                     Button(onClick = { showObjectsTable = true }, modifier = Modifier.padding(end = 8.dp)) {
                         Text("Objekti")
                     }
+                    // Time filter dropdown removed; moved into FiltersDialog
                 }
             }
 
-            // --- Leaderboard FAB ---
+            // --- Leaderboard ---
             FloatingActionButton(
                 onClick = onOpenLeaderboard,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
             ) { Text("🏆") }
 
-            // --- Add Object FAB ---
+            // --- Dodaj objekat ---
             ExtendedFloatingActionButton(
                 onClick = { showAddDialog = true },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 88.dp)
-            ) {
-                Text("Dodaj objekat")
-            }
+            ) { Text("Dodaj objekat") }
 
-            // --- Logout button ---
+            // --- Logout dugme ---
             Button(
                 onClick = {
-                    try {
-                        FirebaseAuth.getInstance().signOut()
-                    } finally {
-                        onLoggedOut()
-                    }
+                    try { FirebaseAuth.getInstance().signOut() } finally { onLoggedOut() }
                 },
                 modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)
-            ) {
-                Text("Izloguj se")
-            }
+            ) { Text("Izloguj se") }
 
             // --- Filters dialog ---
             FiltersDialog(
@@ -239,6 +252,8 @@ fun MapScreen(
                 onLimitByDistanceChange = { limitByDistance = it },
                 maxDistanceMeters = maxDistanceMeters,
                 onMaxDistanceMetersChange = { maxDistanceMeters = it },
+                selectedTimeFilter = selectedTimeFilter,
+                onSelectedTimeFilterChange = { selectedTimeFilter = it },
                 onDismiss = { showFilters = false }
             )
 
@@ -291,11 +306,13 @@ fun MapScreen(
                             "istorijska lokacija", "historical" -> "historical"
                             else -> "attraction"
                         }
+                        // Close dialog immediately for better UX
+                        showAddDialog = false
                         scope.launch {
                             runCatching {
                                 objectRepo.createObject(uid, trimmedName, trimmedDetails, newImageUri, loc, qs, typeKey)
                             }.onSuccess {
-                                newName = ""; newDetails = ""; newImageUri = null; questions.clear(); showAddDialog = false
+                                newName = ""; newDetails = ""; newImageUri = null; questions.clear()
                                 snackbar.showSnackbar("Objekat kreiran (+20 poena)")
                             }.onFailure { e -> snackbar.showSnackbar("Neuspeh: ${e.message}") }
                         }
@@ -331,9 +348,7 @@ fun MapScreen(
                     if (selectedObj != null && currentUserUid != null && objectRepo != null) {
                         objectRepo.addQuestionToObject(selectedObj.id, q, currentUserUid!!) { success ->
                             if (success) {
-                                scope.launch {
-                                    questionList = objectRepo.loadQuestions(selectedObj.id)
-                                }
+                                scope.launch { questionList = objectRepo.loadQuestions(selectedObj.id) }
                             }
                         }
                     }
@@ -341,11 +356,7 @@ fun MapScreen(
                 onRateQuestion = { qId, rating ->
                     if (selectedObj != null && currentUserUid != null && objectRepo != null) {
                         objectRepo.rateQuestion(selectedObj.id, qId, currentUserUid!!, rating) { success ->
-                            if (success) {
-                                scope.launch {
-                                    questionList = objectRepo.loadQuestions(selectedObj.id)
-                                }
-                            }
+                            if (success) { scope.launch { questionList = objectRepo.loadQuestions(selectedObj.id) } }
                         }
                     }
                 },
@@ -353,14 +364,11 @@ fun MapScreen(
                     val obj = selectedObj ?: return@ObjectDetailsDialog
                     val uid = currentUserUid ?: return@ObjectDetailsDialog
                     if (objectRepo != null) {
+                        // Close dialog immediately for better UX
+                        selectedObject = null
                         scope.launch {
                             val ok = runCatching { objectRepo.deleteObject(obj.id, uid) }.getOrElse { false }
-                            if (ok) {
-                                snackbar.showSnackbar("Objekat obrisan")
-                                selectedObject = null
-                            } else {
-                                snackbar.showSnackbar("Greska pri brisanju")
-                            }
+                            if (ok) snackbar.showSnackbar("Objekat obrisan") else snackbar.showSnackbar("Greska pri brisanju")
                         }
                     }
                 },
@@ -384,9 +392,7 @@ fun MapScreen(
             // --- Location loading indicator ---
             if (currentLatLng == null) {
                 Box(modifier = Modifier.align(Alignment.Center)) {
-                    Surface(shadowElevation = 4.dp) {
-                        Text(text = "Trazi se lokacija...")
-                    }
+                    Surface(shadowElevation = 4.dp) { Text(text = "Trazi se lokacija...") }
                 }
             }
         }

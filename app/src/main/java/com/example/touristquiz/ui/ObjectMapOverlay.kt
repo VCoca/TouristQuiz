@@ -14,7 +14,7 @@ fun ObjectMapOverlay(
     fun hueForType(type: String?): Float = when (type?.lowercase()) {
         "cultural" -> BitmapDescriptorFactory.HUE_ORANGE
         "historical" -> BitmapDescriptorFactory.HUE_GREEN
-        else -> BitmapDescriptorFactory.HUE_AZURE // tourist attraction or unknown
+        else -> BitmapDescriptorFactory.HUE_AZURE
     }
 
     objects.forEach { obj ->

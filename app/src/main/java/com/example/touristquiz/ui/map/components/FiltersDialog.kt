@@ -8,10 +8,14 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Arrangement
+import com.example.touristquiz.ui.TimeFilter
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.layout.Box
 
 @Composable
 fun FiltersDialog(
@@ -26,11 +30,12 @@ fun FiltersDialog(
     onLimitByDistanceChange: (Boolean) -> Unit,
     maxDistanceMeters: Float,
     onMaxDistanceMetersChange: (Float) -> Unit,
+    selectedTimeFilter: TimeFilter,
+    onSelectedTimeFilterChange: (TimeFilter) -> Unit,
     onDismiss: () -> Unit
 ) {
     if (!visible) return
 
-    // Localized labels mapped to canonical keys used by MapScreen filters
     val typeOptions = listOf(
         "Turistička atrakcija" to "attraction",
         "Kulturni objekat" to "cultural",
@@ -65,6 +70,23 @@ fun FiltersDialog(
                 if (limitByDistance) {
                     Text("Max udaljenost: ${maxDistanceMeters.toInt()} m")
                     Slider(value = maxDistanceMeters, onValueChange = onMaxDistanceMetersChange, valueRange = 100f..5000f)
+                }
+
+                Text("Vremenski filter")
+                var expanded by remember { mutableStateOf(false) }
+                Box {
+                    Button(onClick = { expanded = true }) { Text(selectedTimeFilter.label) }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        TimeFilter.values().forEach { tf ->
+                            DropdownMenuItem(
+                                text = { Text(tf.label) },
+                                onClick = {
+                                    onSelectedTimeFilterChange(tf)
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }

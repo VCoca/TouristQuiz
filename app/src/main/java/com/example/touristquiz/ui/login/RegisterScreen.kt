@@ -75,7 +75,6 @@ fun RegisterScreen(
 
         Button(
             onClick = {
-                // Validate required fields before attempting registration
                 val anyBlank = listOf(korisnickoIme, ime, prezime, brTelefona, email, password).any { it.trim().isEmpty() }
                 if (anyBlank) {
                     errorMessage = "Sva polja su obavezna."
@@ -95,7 +94,6 @@ fun RegisterScreen(
                     ) { success: Boolean, error: String? ->
                         isLoading = false
                         if (success) {
-                            // Auto-login: navigate onward; Firebase usually signs in after create
                             onRegisterSuccess()
                         } else {
                             errorMessage = error ?: "Registracija nije uspela"
